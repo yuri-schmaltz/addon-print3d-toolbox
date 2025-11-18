@@ -348,7 +348,17 @@ class MESH_OT_report_select(Operator):
     def execute(self, context):
         obj = context.edit_object
         info = report.info()
+
+        if not info or self.index >= len(info):
+            self.report({"ERROR"}, "Report is out of date, re-run check")
+            return {"CANCELLED"}
+
         _text, data = info[self.index]
+
+        if data is None:
+            self.report({"ERROR"}, "Report is out of date, re-run check")
+            return {"CANCELLED"}
+
         bm_type, bm_array = data
 
         bpy.ops.mesh.reveal()
@@ -358,12 +368,12 @@ class MESH_OT_report_select(Operator):
         bm = bmesh.from_edit_mesh(obj.data)
         elems = getattr(bm, MESH_OT_report_select._type_to_attr[bm_type])[:]
 
-        try:
-            for i in bm_array:
+        for i in bm_array:
+            try:
                 elems[i].select_set(True)
-        except:
-            # possible arrays are out of sync
-            self.report({"ERROR"}, "Report is out of date, re-run check")
+            except IndexError:
+                self.report({"ERROR"}, "Report is out of date, re-run check")
+                return {"CANCELLED"}
 
         return {"FINISHED"}
 

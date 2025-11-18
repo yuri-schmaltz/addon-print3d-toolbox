@@ -85,6 +85,12 @@ class VIEW3D_PT_print3d_analyze(Sidebar, Panel):
         row.operator("mesh.print3d_check_overhang")
         row.prop(props, "angle_overhang", text="")
 
+        layout.label(text="Orientation")
+        row = layout.row(align=True)
+        row.operator("object.print3d_optimize_overhang", text="Optimize Overhang")
+        row.prop(props, "overhang_optimize_angle", text="")
+        row.prop(props, "overhang_optimize_iterations", text="")
+
         layout.operator("mesh.print3d_check_all")
 
         self.draw_report(context)

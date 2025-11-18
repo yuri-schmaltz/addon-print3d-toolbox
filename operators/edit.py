@@ -6,6 +6,9 @@
 
 import math
 
+import importlib
+import importlib.util
+
 import bmesh
 import bpy
 from bpy.app.translations import pgettext_tip as tip_
@@ -62,12 +65,20 @@ class MESH_OT_hollow(Operator):
         layout.prop(self, "make_hollow_duplicate")
 
     def execute(self, context):
-        import numpy as np
+        numpy_spec = importlib.util.find_spec("numpy")
+        if numpy_spec is None:
+            self.report({"ERROR"}, "NumPy is required for hollowing. Install numpy and try again")
+            return {"CANCELLED"}
 
-        if bpy.app.version >= (4, 4, 0):
-            import openvdb as vdb
-        else:
-            import pyopenvdb as vdb
+        np = importlib.import_module("numpy")
+
+        vdb_module = "openvdb" if bpy.app.version >= (4, 4, 0) else "pyopenvdb"
+        vdb_spec = importlib.util.find_spec(vdb_module)
+        if vdb_spec is None:
+            self.report({"ERROR"}, f"{vdb_module} is required for hollowing. Install the dependency and try again")
+            return {"CANCELLED"}
+
+        vdb = importlib.import_module(vdb_module)
 
         if not self.offset:
             return {"FINISHED"}

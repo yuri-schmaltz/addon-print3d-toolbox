@@ -22,6 +22,10 @@ class EXPORT_SCENE_OT_export(Operator):
         options={"SKIP_SAVE", "HIDDEN"},
     )
 
+    @classmethod
+    def poll(cls, context):
+        return bool(context.selected_objects)
+
     def execute(self, context):
         unit = context.scene.unit_settings
         props = context.scene.print3d_toolbox
@@ -32,12 +36,8 @@ class EXPORT_SCENE_OT_export(Operator):
 
         # this can fail with strange errors,
         # if the dir can't be made then we get an error later.
-        try:
-            from pathlib import Path
-            Path(filepath).parent.mkdir(parents=True, exist_ok=True)
-        except:
-            import traceback
-            traceback.print_exc()
+        if not _ensure_export_dir(filepath, self.report):
+            return {"CANCELLED"}
 
         if props.export_format == "STL":
             ret = bpy.ops.wm.stl_export(
@@ -163,3 +163,15 @@ def _image_copy_guess(filepath: str, objects: list[Object]) -> None:
             except:
                 import traceback
                 traceback.print_exc()
+
+
+def _ensure_export_dir(filepath: str, report) -> bool:
+    from pathlib import Path
+
+    try:
+        Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        report({"ERROR"}, f"Cannot create export directory: {exc}")
+        return False
+
+    return True

@@ -72,7 +72,10 @@ class MESH_OT_clean_non_manifold(Operator):
     def remove_doubles(threshold: float):
         """remove duplicate vertices"""
         bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.mesh.remove_doubles(threshold=threshold)
+        if hasattr(bpy.ops.mesh, "merge_by_distance"):
+            bpy.ops.mesh.merge_by_distance(distance=threshold)
+        else:
+            bpy.ops.mesh.remove_doubles(threshold=threshold)
 
     @staticmethod
     def delete_loose():

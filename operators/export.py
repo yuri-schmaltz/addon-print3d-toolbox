@@ -31,6 +31,19 @@ class EXPORT_SCENE_OT_export(Operator):
         props = context.scene.print3d_toolbox
 
         global_scale = unit.scale_length if (unit.system != "NONE" and props.use_scene_scale) else 1.0
+
+        if (
+            props.use_assembly_tolerance
+            and props.apply_tolerance_on_export
+            and len(context.selected_objects) > 1
+        ):
+            dims = [max(obj.dimensions) for obj in context.selected_objects if obj.type == "MESH"]
+            if dims:
+                max_dim = max(dims)
+                if max_dim > 0.0:
+                    tolerance_scale = max(0.0, 1.0 - (props.assembly_tolerance / max_dim))
+                    global_scale *= tolerance_scale
+
         path_mode = "COPY" if props.use_copy_textures else "AUTO"
         filepath = bpy.path.ensure_ext(self.filepath, f".{props.export_format.lower()}")
 
@@ -68,6 +81,15 @@ class EXPORT_SCENE_OT_export(Operator):
                 export_colors=props.use_colors,
                 export_materials=props.use_copy_textures,
                 path_mode=path_mode,
+                apply_modifiers=True,
+                export_selected_objects=True,
+            )
+        elif props.export_format == "3MF":
+            ret = bpy.ops.export_scene.threemf(
+                filepath=filepath,
+                global_scale=global_scale,
+                use_scene_unit=props.use_3mf_units,
+                export_materials=props.use_3mf_materials,
                 apply_modifiers=True,
                 export_selected_objects=True,
             )

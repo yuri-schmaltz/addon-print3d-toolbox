@@ -87,7 +87,21 @@ class VIEW3D_PT_print3d_analyze(Sidebar, Panel):
         row.operator("mesh.print3d_check_overhang")
         row.prop(props, "angle_overhang", text="")
 
+        layout.label(text="Orientation")
+        row = layout.row(align=True)
+        row.operator("object.print3d_optimize_overhang", text="Optimize Overhang")
+        row.prop(props, "overhang_optimize_angle", text="")
+        row.prop(props, "overhang_optimize_iterations", text="")
+
         layout.operator("mesh.print3d_check_all")
+
+        layout.separator()
+        layout.label(text="Multi-Object")
+        row = layout.row(align=True)
+        row.prop(props, "analyze_selected_objects")
+        row = layout.row(align=True)
+        row.prop(props, "use_assembly_tolerance")
+        row.prop(props, "assembly_tolerance", text="")
 
         self.draw_report(context)
 
@@ -170,6 +184,7 @@ class VIEW3D_PT_print3d_export(Sidebar, Panel):
 
         layout.prop(props, "export_path", text="")
         layout.prop(props, "export_format")
+        layout.prop(props, "export_preset")
 
         layout.operator("export_scene.print3d_export", icon="EXPORT")
 
@@ -178,7 +193,7 @@ class VIEW3D_PT_print3d_export(Sidebar, Panel):
         if panel:
             col = panel.column(heading="General")
             sub = col.column()
-            sub.active = props.export_format != "OBJ"
+            sub.active = props.export_format not in {"OBJ", "3MF"}
             sub.prop(props, "use_ascii_format")
             col.prop(props, "use_scene_scale")
 
@@ -190,3 +205,8 @@ class VIEW3D_PT_print3d_export(Sidebar, Panel):
 
             col = panel.column(heading="Materials")
             col.prop(props, "use_copy_textures")
+
+            col = panel.column(heading="3MF")
+            col.active = props.export_format == "3MF"
+            col.prop(props, "use_3mf_materials")
+            col.prop(props, "use_3mf_units")

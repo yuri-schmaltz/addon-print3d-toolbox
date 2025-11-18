@@ -13,6 +13,7 @@ from bpy.props import (
 )
 from bpy.types import PropertyGroup
 
+from . import __package__ as base_package
 from . import report
 
 
@@ -83,6 +84,20 @@ class SceneProperties(PropertyGroup):
         max=math.radians(90.0),
         step=100,
     )
+    overhang_optimize_angle: FloatProperty(
+        name="Target Angle",
+        subtype="ANGLE",
+        default=math.radians(45.0),
+        min=0.0,
+        max=math.radians(90.0),
+        step=100,
+    )
+    overhang_optimize_iterations: IntProperty(
+        name="Iterations",
+        default=48,
+        min=1,
+        soft_max=256,
+    )
 
     # Export
     # -------------------------------------
@@ -100,8 +115,15 @@ class SceneProperties(PropertyGroup):
             ("OBJ", "OBJ", ""),
             ("PLY", "PLY", ""),
             ("STL", "STL", ""),
+            ("3MF", "3MF", ""),
         ),
         default="STL",
+    )
+    export_preset: EnumProperty(
+        name="Preset",
+        description="Choose a preset to apply saved export settings",
+        items=_preset_items,
+        update=lambda self, context: self.apply_preset(context),
     )
     use_ascii_format: BoolProperty(
         name="ASCII",
@@ -122,8 +144,42 @@ class SceneProperties(PropertyGroup):
     )
     use_colors: BoolProperty(
         name="Colors",
-        description="Export vertex color attributes"
+        description="Export vertex color attributes",
     )
+    use_3mf_materials: BoolProperty(
+        name="Materials",
+        description="Include materials in the 3MF export",
+        default=True,
+    )
+    use_3mf_units: BoolProperty(
+        name="Units",
+        description="Write scene unit information to the 3MF export",
+        default=True,
+    )
+
+    def apply_preset(self, context) -> None:
+        if not self.export_preset or context is None:
+            return
+
+        addon = context.preferences.addons.get(base_package)
+        if addon is None:
+            return
+
+        prefs = addon.preferences
+        index = int(self.export_preset)
+        if index >= len(prefs.export_presets):
+            return
+
+        preset = prefs.export_presets[index]
+        self.export_format = preset.export_format
+        self.use_ascii_format = preset.use_ascii_format
+        self.use_scene_scale = preset.use_scene_scale
+        self.use_copy_textures = preset.use_copy_textures
+        self.use_uv = preset.use_uv
+        self.use_normals = preset.use_normals
+        self.use_colors = preset.use_colors
+        self.use_3mf_materials = preset.use_3mf_materials
+        self.use_3mf_units = preset.use_3mf_units
 
     # Build Volume
     # -------------------------------------

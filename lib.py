@@ -5,7 +5,6 @@
 import array
 import random
 from collections.abc import Iterator, MutableSequence
-from random import uniform
 
 import bmesh
 import bpy
@@ -124,8 +123,8 @@ def _bmesh_face_points_random(f: BMFace, num_points=1, margin=0.05) -> Iterator[
     vecs = [v.co for v in f.verts]
 
     for _ in range(num_points):
-        u1 = uniform(*uniform_args)
-        u2 = uniform(*uniform_args)
+        u1 = random.uniform(*uniform_args)
+        u2 = random.uniform(*uniform_args)
         u_tot = u1 + u2
 
         if u_tot > 1.0:

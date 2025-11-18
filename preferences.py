@@ -4,10 +4,36 @@
 
 import math
 
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import (
+    BoolProperty,
+    BoolVectorProperty,
+    EnumProperty,
+    FloatProperty,
+    StringProperty,
+)
 from bpy.types import PropertyGroup
 
 from . import report
+
+
+BED_PROFILES = {
+    "ENDER3": (220.0, 220.0, 250.0, "Ender 3 (220x220x250mm)"),
+    "PRUSA_MK4": (250.0, 210.0, 220.0, "Prusa MK4 (250x210x220mm)"),
+    "BAMBULAB_P1P": (256.0, 256.0, 256.0, "Bambu Lab P1P (256x256x256mm)"),
+    "CUSTOM": (220.0, 220.0, 220.0, "Custom"),
+}
+
+
+def bed_profile_items(self, _context):
+    return [(key, name, "") for key, (_x, _y, _z, name) in BED_PROFILES.items()]
+
+
+def bed_profile_dimensions(props) -> tuple[float, float, float]:
+    if props.bed_profile == "CUSTOM":
+        return props.bed_size_x, props.bed_size_y, props.bed_size_z
+
+    x, y, z, _label = BED_PROFILES[props.bed_profile]
+    return x, y, z
 
 
 class SceneProperties(PropertyGroup):
@@ -97,6 +123,45 @@ class SceneProperties(PropertyGroup):
     use_colors: BoolProperty(
         name="Colors",
         description="Export vertex color attributes"
+    )
+
+    # Build Volume
+    # -------------------------------------
+
+    bed_profile: EnumProperty(
+        name="Profile",
+        description="Select a preset build volume or use a custom size",
+        items=bed_profile_items,
+        default="ENDER3",
+    )
+    bed_size_x: FloatProperty(
+        name="Width",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][0],
+        min=0.0,
+    )
+    bed_size_y: FloatProperty(
+        name="Depth",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][1],
+        min=0.0,
+    )
+    bed_size_z: FloatProperty(
+        name="Height",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][2],
+        min=0.0,
+    )
+    bed_report: StringProperty(
+        name="",
+        description="Last build volume validation result",
+        default="",
+        options={"HIDDEN"},
+    )
+    bed_axis_overflow: BoolVectorProperty(
+        size=3,
+        default=(False, False, False),
+        options={"HIDDEN"},
     )
 
     @staticmethod

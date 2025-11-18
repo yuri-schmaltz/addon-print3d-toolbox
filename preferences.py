@@ -9,6 +9,7 @@ from bpy.props import (
     BoolVectorProperty,
     EnumProperty,
     FloatProperty,
+    IntProperty,
     StringProperty,
 )
 from bpy.types import PropertyGroup

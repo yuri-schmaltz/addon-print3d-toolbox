@@ -57,6 +57,29 @@ class SceneProperties(PropertyGroup):
         max=math.radians(90.0),
         step=100,
     )
+    analyze_selected_objects: BoolProperty(
+        name="Analyze Selected",
+        description="Run checks on all selected mesh objects instead of only the active one",
+    )
+    use_assembly_tolerance: BoolProperty(
+        name="Assembly Fit",
+        description="Treat selected objects as mating parts and include tolerance assistance",
+    )
+    assembly_tolerance: FloatProperty(
+        name="Fit Tolerance",
+        subtype="DISTANCE",
+        default=0.0005,
+        min=0.0,
+        max=0.01,
+        precision=4,
+        step=0.001,
+        description="Target clearance between parts that should fit together",
+    )
+    apply_tolerance_on_export: BoolProperty(
+        name="Apply on Export",
+        description="Adjust export scale to account for the assembly tolerance when exporting multiple objects",
+        default=True,
+    )
 
     # Export
     # -------------------------------------

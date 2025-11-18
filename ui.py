@@ -87,6 +87,14 @@ class VIEW3D_PT_print3d_analyze(Sidebar, Panel):
 
         layout.operator("mesh.print3d_check_all")
 
+        layout.separator()
+        layout.label(text="Multi-Object")
+        row = layout.row(align=True)
+        row.prop(props, "analyze_selected_objects")
+        row = layout.row(align=True)
+        row.prop(props, "use_assembly_tolerance")
+        row.prop(props, "assembly_tolerance", text="")
+
         self.draw_report(context)
 
 
@@ -154,3 +162,10 @@ class VIEW3D_PT_print3d_export(Sidebar, Panel):
 
             col = panel.column(heading="Materials")
             col.prop(props, "use_copy_textures")
+
+            col = panel.column(heading="Assembly")
+            col.prop(props, "use_assembly_tolerance")
+            sub = col.column()
+            sub.active = props.use_assembly_tolerance
+            sub.prop(props, "assembly_tolerance", text="Tolerance")
+            sub.prop(props, "apply_tolerance_on_export")

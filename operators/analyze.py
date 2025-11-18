@@ -119,7 +119,8 @@ def execute_check(self, context):
 
 
 def multiple_obj_warning(self, context) -> None:
-    if len(context.selected_objects) > 1:
+    props = context.scene.print3d_toolbox
+    if len(context.selected_objects) > 1 and not props.analyze_selected_objects:
         self.report({"WARNING"}, "Multiple selected objects. Only the active one will be evaluated")
 
 
@@ -311,16 +312,87 @@ class MESH_OT_check_all(Operator):
         MESH_OT_check_overhang,
     )
 
-    def execute(self, context):
-        obj = context.active_object
+    @staticmethod
+    def _check_object(obj: Object, include_data: bool) -> list[tuple[str, tuple | None]]:
+        info_obj: list[tuple[str, tuple | None]] = []
+
+        for cls in MESH_OT_check_all.check_cls:
+            cls.main_check(obj, info_obj)
+
+        if include_data:
+            return [(f"{obj.name}: {text}", data) for text, data in info_obj]
+        return [(f"{obj.name}: {text}", None) for text, _data in info_obj]
+
+    @staticmethod
+    def _assembly_clearance_info(objects: list[Object], tolerance: float) -> list[tuple[str, None]]:
+        if len(objects) < 2 or tolerance <= 0.0:
+            return []
+
+        from mathutils import Vector
+
+        def _bbox_world(ob: Object) -> tuple[Vector, Vector]:
+            coords = [ob.matrix_world @ Vector(corner) for corner in ob.bound_box]
+            mins = Vector((min(c[i] for c in coords) for i in range(3)))
+            maxs = Vector((max(c[i] for c in coords) for i in range(3)))
+            return mins, maxs
+
+        def _axis_gap(min_a: float, max_a: float, min_b: float, max_b: float) -> float:
+            if max_a < min_b:
+                return min_b - max_a
+            if max_b < min_a:
+                return min_a - max_b
+            return 0.0
 
         info = []
-        for cls in self.check_cls:
-            cls.main_check(obj, info)
+        tol_text = f"{tolerance:.4f}m"
 
-        report.update(*info)
+        for i, obj_a in enumerate(objects):
+            min_a, max_a = _bbox_world(obj_a)
+            for obj_b in objects[i + 1:]:
+                min_b, max_b = _bbox_world(obj_b)
+                gaps = (
+                    _axis_gap(min_a.x, max_a.x, min_b.x, max_b.x),
+                    _axis_gap(min_a.y, max_a.y, min_b.y, max_b.y),
+                    _axis_gap(min_a.z, max_a.z, min_b.z, max_b.z),
+                )
+                clearance = max(gaps)
+                if clearance < tolerance:
+                    info.append((
+                        tip_("Assembly clearance {} vs {}: {:.4f}m is below tolerance {}".format(
+                            obj_a.name, obj_b.name, clearance, tol_text,
+                        )),
+                        None,
+                    ))
 
-        multiple_obj_warning(self, context)
+        return info
+
+    def execute(self, context):
+        obj = context.active_object
+        props = context.scene.print3d_toolbox
+
+        if props.analyze_selected_objects:
+            selected = [ob for ob in context.selected_objects if ob.type == "MESH"]
+            if not selected:
+                self.report({"ERROR"}, "No selected mesh objects to analyze")
+                return {"CANCELLED"}
+
+            info_batch: list[tuple[str, tuple | None]] = []
+            for ob in selected:
+                include_data = ob == obj
+                info_batch.extend(self._check_object(ob, include_data))
+
+            if props.use_assembly_tolerance:
+                info_batch.extend(self._assembly_clearance_info(selected, props.assembly_tolerance))
+
+            report.update(*info_batch)
+        else:
+            info = []
+            for cls in self.check_cls:
+                cls.main_check(obj, info)
+
+            report.update(*info)
+
+            multiple_obj_warning(self, context)
 
         return {"FINISHED"}
 

@@ -248,6 +248,20 @@ class SceneProperties(PropertyGroup):
         max=math.radians(90.0),
         step=100,
     )
+    overhang_optimize_angle: FloatProperty(
+        name="Target Angle",
+        subtype="ANGLE",
+        default=math.radians(45.0),
+        min=0.0,
+        max=math.radians(90.0),
+        step=100,
+    )
+    overhang_optimize_iterations: IntProperty(
+        name="Iterations",
+        default=48,
+        min=1,
+        soft_max=256,
+    )
 
     # Export
     # -------------------------------------

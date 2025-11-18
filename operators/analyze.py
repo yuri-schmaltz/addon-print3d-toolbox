@@ -10,6 +10,7 @@ from bmesh.types import BMEdge, BMFace, BMVert
 from bpy.app.translations import pgettext_tip as tip_
 from bpy.props import IntProperty
 from bpy.types import Object, Operator
+from mathutils import Euler, Matrix, Vector
 
 from .. import report
 
@@ -119,7 +120,8 @@ def execute_check(self, context):
 
 
 def multiple_obj_warning(self, context) -> None:
-    if len(context.selected_objects) > 1:
+    props = context.scene.print3d_toolbox
+    if len(context.selected_objects) > 1 and not props.analyze_selected_objects:
         self.report({"WARNING"}, "Multiple selected objects. Only the active one will be evaluated")
 
 
@@ -295,6 +297,100 @@ class MESH_OT_check_overhang(Operator):
         return execute_check(self, context)
 
 
+class OBJECT_OT_optimize_overhang(Operator):
+    bl_idname = "object.print3d_optimize_overhang"
+    bl_label = "Optimize Overhang Orientation"
+    bl_description = "Sample orientations and rotate the active object to reduce overhangs"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @staticmethod
+    def _iter_rotations(iterations: int):
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+
+        for i in range(iterations):
+            yaw = (i * golden_angle) % (math.tau)
+            pitch = math.acos(1.0 - 2.0 * ((i + 0.5) / iterations)) - (math.pi / 2.0)
+            yield Euler((pitch, 0.0, yaw)).to_quaternion()
+
+    @staticmethod
+    def _overhang_score(obj: Object, matrix_world: Matrix, limit_angle: float) -> tuple[int, float]:
+        from .. import lib
+
+        bm = lib.bmesh_copy_from_object(obj, transform=False, triangulate=False)
+
+        mat = matrix_world.copy()
+        mat.translation.zero()
+        if not mat.is_identity:
+            bm.transform(mat)
+            bm.normal_update()
+
+        z_down = Vector((0.0, 0.0, -1.0))
+        z_down_angle = z_down.angle
+        angle_overhang = (math.pi / 2.0) - limit_angle
+
+        overhang_count = 0
+        min_angle = math.pi
+
+        for face in bm.faces:
+            angle = z_down_angle(face.normal, 4.0)
+            min_angle = min(min_angle, angle)
+            if angle < angle_overhang:
+                overhang_count += 1
+
+        bm.free()
+
+        return overhang_count, min_angle
+
+    @staticmethod
+    def _is_better(score: tuple[int, float], current: tuple[int, float]) -> bool:
+        count, angle = score
+        best_count, best_angle = current
+        return count < best_count or (count == best_count and angle > best_angle)
+
+    def execute(self, context):
+        if context.mode not in {"OBJECT", "EDIT_MESH"}:
+            return {"CANCELLED"}
+
+        obj = context.active_object
+
+        if obj is None or obj.type != "MESH":
+            self.report({"ERROR"}, "Active object is not a mesh")
+            return {"CANCELLED"}
+
+        props = context.scene.print3d_toolbox
+        iterations = max(1, props.overhang_optimize_iterations)
+        limit_angle = props.overhang_optimize_angle
+
+        loc, rot, scale = obj.matrix_world.decompose()
+        base_matrix = Matrix.LocRotScale(loc, rot, scale)
+        best_matrix = base_matrix
+        best_score = self._overhang_score(obj, base_matrix, limit_angle)
+
+        for quat in self._iter_rotations(iterations):
+            candidate_rot = quat @ rot
+            candidate_matrix = Matrix.LocRotScale(loc, candidate_rot, scale)
+            score = self._overhang_score(obj, candidate_matrix, limit_angle)
+
+            if self._is_better(score, best_score):
+                best_score = score
+                best_matrix = candidate_matrix
+
+        obj.matrix_world = best_matrix
+
+        overhang_faces, min_angle = best_score
+        angle_deg = math.degrees(min_angle)
+        self.report(
+            {"INFO"},
+            tip_("Overhang optimized: {} overhang faces, smallest angle {:.1f}°").format(
+                overhang_faces, angle_deg
+            ),
+        )
+
+        multiple_obj_warning(self, context)
+
+        return {"FINISHED"}
+
+
 class MESH_OT_check_all(Operator):
     bl_idname = "mesh.print3d_check_all"
     bl_label = "Check All"
@@ -311,16 +407,87 @@ class MESH_OT_check_all(Operator):
         MESH_OT_check_overhang,
     )
 
-    def execute(self, context):
-        obj = context.active_object
+    @staticmethod
+    def _check_object(obj: Object, include_data: bool) -> list[tuple[str, tuple | None]]:
+        info_obj: list[tuple[str, tuple | None]] = []
+
+        for cls in MESH_OT_check_all.check_cls:
+            cls.main_check(obj, info_obj)
+
+        if include_data:
+            return [(f"{obj.name}: {text}", data) for text, data in info_obj]
+        return [(f"{obj.name}: {text}", None) for text, _data in info_obj]
+
+    @staticmethod
+    def _assembly_clearance_info(objects: list[Object], tolerance: float) -> list[tuple[str, None]]:
+        if len(objects) < 2 or tolerance <= 0.0:
+            return []
+
+        from mathutils import Vector
+
+        def _bbox_world(ob: Object) -> tuple[Vector, Vector]:
+            coords = [ob.matrix_world @ Vector(corner) for corner in ob.bound_box]
+            mins = Vector((min(c[i] for c in coords) for i in range(3)))
+            maxs = Vector((max(c[i] for c in coords) for i in range(3)))
+            return mins, maxs
+
+        def _axis_gap(min_a: float, max_a: float, min_b: float, max_b: float) -> float:
+            if max_a < min_b:
+                return min_b - max_a
+            if max_b < min_a:
+                return min_a - max_b
+            return 0.0
 
         info = []
-        for cls in self.check_cls:
-            cls.main_check(obj, info)
+        tol_text = f"{tolerance:.4f}m"
 
-        report.update(*info)
+        for i, obj_a in enumerate(objects):
+            min_a, max_a = _bbox_world(obj_a)
+            for obj_b in objects[i + 1:]:
+                min_b, max_b = _bbox_world(obj_b)
+                gaps = (
+                    _axis_gap(min_a.x, max_a.x, min_b.x, max_b.x),
+                    _axis_gap(min_a.y, max_a.y, min_b.y, max_b.y),
+                    _axis_gap(min_a.z, max_a.z, min_b.z, max_b.z),
+                )
+                clearance = max(gaps)
+                if clearance < tolerance:
+                    info.append((
+                        tip_("Assembly clearance {} vs {}: {:.4f}m is below tolerance {}".format(
+                            obj_a.name, obj_b.name, clearance, tol_text,
+                        )),
+                        None,
+                    ))
 
-        multiple_obj_warning(self, context)
+        return info
+
+    def execute(self, context):
+        obj = context.active_object
+        props = context.scene.print3d_toolbox
+
+        if props.analyze_selected_objects:
+            selected = [ob for ob in context.selected_objects if ob.type == "MESH"]
+            if not selected:
+                self.report({"ERROR"}, "No selected mesh objects to analyze")
+                return {"CANCELLED"}
+
+            info_batch: list[tuple[str, tuple | None]] = []
+            for ob in selected:
+                include_data = ob == obj
+                info_batch.extend(self._check_object(ob, include_data))
+
+            if props.use_assembly_tolerance:
+                info_batch.extend(self._assembly_clearance_info(selected, props.assembly_tolerance))
+
+            report.update(*info_batch)
+        else:
+            info = []
+            for cls in self.check_cls:
+                cls.main_check(obj, info)
+
+            report.update(*info)
+
+            multiple_obj_warning(self, context)
 
         return {"FINISHED"}
 

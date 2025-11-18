@@ -6,199 +6,35 @@ import math
 
 from bpy.props import (
     BoolProperty,
-    CollectionProperty,
+    BoolVectorProperty,
     EnumProperty,
     FloatProperty,
-    IntProperty,
     StringProperty,
 )
-from bpy.types import AddonPreferences, Operator, PropertyGroup, UIList
+from bpy.types import PropertyGroup
 
 from . import __package__ as base_package
 from . import report
 
 
-def _preset_items(_self, context):
-    items = [("", "None", "", 0)]
-
-    if context is None:
-        return items
-
-    addon = context.preferences.addons.get(base_package)
-    if addon is None:
-        return items
-
-    prefs = addon.preferences
-    for i, preset in enumerate(prefs.export_presets):
-        items.append((str(i), preset.name, preset.description, i + 1))
-
-    return items
+BED_PROFILES = {
+    "ENDER3": (220.0, 220.0, 250.0, "Ender 3 (220x220x250mm)"),
+    "PRUSA_MK4": (250.0, 210.0, 220.0, "Prusa MK4 (250x210x220mm)"),
+    "BAMBULAB_P1P": (256.0, 256.0, 256.0, "Bambu Lab P1P (256x256x256mm)"),
+    "CUSTOM": (220.0, 220.0, 220.0, "Custom"),
+}
 
 
-class ExportPreset(PropertyGroup):
-    name: StringProperty(name="Name", default="Preset")
-    description: StringProperty(name="Description", default="")
-    export_format: EnumProperty(
-        name="Format",
-        items=(
-            ("OBJ", "OBJ", ""),
-            ("PLY", "PLY", ""),
-            ("STL", "STL", ""),
-            ("3MF", "3MF", ""),
-        ),
-        default="STL",
-    )
-    use_ascii_format: BoolProperty(name="ASCII")
-    use_scene_scale: BoolProperty(name="Scene Scale")
-    use_copy_textures: BoolProperty(name="Copy Textures")
-    use_uv: BoolProperty(name="UVs")
-    use_normals: BoolProperty(name="Normals")
-    use_colors: BoolProperty(name="Colors")
-    use_3mf_materials: BoolProperty(name="3MF Materials", default=True)
-    use_3mf_units: BoolProperty(name="3MF Units", default=True)
+def bed_profile_items(self, _context):
+    return [(key, name, "") for key, (_x, _y, _z, name) in BED_PROFILES.items()]
 
 
-class PRINT3D_UL_export_presets(UIList):
-    def draw_item(self, _context, layout, _data, item, icon, _active_data, _active_propname, index):
-        del icon
+def bed_profile_dimensions(props) -> tuple[float, float, float]:
+    if props.bed_profile == "CUSTOM":
+        return props.bed_size_x, props.bed_size_y, props.bed_size_z
 
-        if self.layout_type in {"DEFAULT", "COMPACT"}:
-            layout.label(text=item.name, translate=False)
-            layout.label(text=item.export_format, translate=False)
-        elif self.layout_type == "GRID":
-            layout.alignment = "CENTER"
-            layout.label(text=str(index))
-
-
-class PRINT3D_OT_preset_add(Operator):
-    bl_idname = "print3d.preset_add"
-    bl_label = "Add Export Preset"
-
-    def execute(self, context):
-        addon = context.preferences.addons.get(base_package)
-        if addon is None:
-            return {"CANCELLED"}
-
-        prefs = addon.preferences
-        scene_props = context.scene.print3d_toolbox
-
-        preset = prefs.export_presets.add()
-        preset.name = f"Preset {len(prefs.export_presets)}"
-        self._copy_from_scene(scene_props, preset)
-        prefs.export_preset_active = len(prefs.export_presets) - 1
-        return {"FINISHED"}
-
-    @staticmethod
-    def _copy_from_scene(scene_props, preset):
-        preset.export_format = scene_props.export_format
-        preset.use_ascii_format = scene_props.use_ascii_format
-        preset.use_scene_scale = scene_props.use_scene_scale
-        preset.use_copy_textures = scene_props.use_copy_textures
-        preset.use_uv = scene_props.use_uv
-        preset.use_normals = scene_props.use_normals
-        preset.use_colors = scene_props.use_colors
-        preset.use_3mf_materials = scene_props.use_3mf_materials
-        preset.use_3mf_units = scene_props.use_3mf_units
-
-
-class PRINT3D_OT_preset_remove(Operator):
-    bl_idname = "print3d.preset_remove"
-    bl_label = "Remove Export Preset"
-
-    @classmethod
-    def poll(cls, context):
-        addon = context.preferences.addons.get(base_package)
-        return addon is not None and bool(addon.preferences.export_presets)
-
-    def execute(self, context):
-        addon = context.preferences.addons.get(base_package)
-        prefs = addon.preferences
-
-        if not prefs.export_presets:
-            return {"CANCELLED"}
-
-        prefs.export_presets.remove(prefs.export_preset_active)
-        prefs.export_preset_active = min(prefs.export_preset_active, len(prefs.export_presets) - 1)
-        return {"FINISHED"}
-
-
-def _init_default_presets(prefs):
-    if prefs.export_presets:
-        return
-
-    preset = prefs.export_presets.add()
-    preset.name = "FFF PLA"
-    preset.description = "General-purpose FFF profile with materials enabled"
-    preset.export_format = "3MF"
-    preset.use_scene_scale = True
-    preset.use_copy_textures = True
-    preset.use_uv = True
-    preset.use_normals = True
-    preset.use_colors = True
-    preset.use_3mf_materials = True
-    preset.use_3mf_units = True
-
-    preset = prefs.export_presets.add()
-    preset.name = "SLA Resin"
-    preset.description = "Simple watertight STL preset for resin printers"
-    preset.export_format = "STL"
-    preset.use_scene_scale = True
-    preset.use_normals = True
-    preset.use_colors = False
-
-
-class AddonPrefs(AddonPreferences):
-    bl_idname = base_package
-
-    export_presets: CollectionProperty(type=ExportPreset)
-    export_preset_active: IntProperty()
-
-    def draw(self, _context):
-        layout = self.layout
-        _init_default_presets(self)
-        layout.label(text="Export Presets")
-
-        row = layout.row()
-        row.template_list(
-            "PRINT3D_UL_export_presets",
-            "",
-            self,
-            "export_presets",
-            self,
-            "export_preset_active",
-            rows=3,
-        )
-
-        col = row.column(align=True)
-        col.operator("print3d.preset_add", icon="ADD", text="")
-        col.operator("print3d.preset_remove", icon="REMOVE", text="")
-
-        if 0 <= self.export_preset_active < len(self.export_presets):
-            preset = self.export_presets[self.export_preset_active]
-            box = layout.box()
-            box.prop(preset, "name")
-            box.prop(preset, "description")
-            box.prop(preset, "export_format")
-
-            col = box.column(heading="General")
-            sub = col.column()
-            sub.active = preset.export_format != "OBJ"
-            sub.prop(preset, "use_ascii_format")
-            col.prop(preset, "use_scene_scale")
-
-            col = box.column(heading="Geometry")
-            col.active = preset.export_format != "STL"
-            col.prop(preset, "use_uv")
-            col.prop(preset, "use_normals")
-            col.prop(preset, "use_colors")
-
-            col = box.column(heading="Materials")
-            col.prop(preset, "use_copy_textures")
-
-            col = box.column(heading="3MF")
-            col.active = preset.export_format == "3MF"
-            col.prop(preset, "use_3mf_materials")
-            col.prop(preset, "use_3mf_units")
+    x, y, z, _label = BED_PROFILES[props.bed_profile]
+    return x, y, z
 
 
 class SceneProperties(PropertyGroup):
@@ -344,6 +180,45 @@ class SceneProperties(PropertyGroup):
         self.use_colors = preset.use_colors
         self.use_3mf_materials = preset.use_3mf_materials
         self.use_3mf_units = preset.use_3mf_units
+
+    # Build Volume
+    # -------------------------------------
+
+    bed_profile: EnumProperty(
+        name="Profile",
+        description="Select a preset build volume or use a custom size",
+        items=bed_profile_items,
+        default="ENDER3",
+    )
+    bed_size_x: FloatProperty(
+        name="Width",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][0],
+        min=0.0,
+    )
+    bed_size_y: FloatProperty(
+        name="Depth",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][1],
+        min=0.0,
+    )
+    bed_size_z: FloatProperty(
+        name="Height",
+        subtype="DISTANCE",
+        default=BED_PROFILES["CUSTOM"][2],
+        min=0.0,
+    )
+    bed_report: StringProperty(
+        name="",
+        description="Last build volume validation result",
+        default="",
+        options={"HIDDEN"},
+    )
+    bed_axis_overflow: BoolVectorProperty(
+        size=3,
+        default=(False, False, False),
+        options={"HIDDEN"},
+    )
 
     @staticmethod
     def get_report():

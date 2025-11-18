@@ -3,9 +3,11 @@
 # SPDX-FileCopyrightText: 2017-2025 Mikhail Rachinskiy
 
 import bmesh
+from bpy.app.translations import pgettext_tip as tip_
 from bpy.types import Object, Panel
 
 from . import report
+from .preferences import bed_profile_dimensions
 
 
 def _is_mesh(ob: Object) -> bool:
@@ -121,12 +123,46 @@ class VIEW3D_PT_print3d_edit(Sidebar, Panel):
     def draw(self, context):
         layout = self.layout
         is_mesh = _is_mesh(context.object)
+        props = context.scene.print3d_toolbox
 
         layout.operator("mesh.print3d_hollow")
 
         row = layout.row()
         row.enabled = is_mesh
         row.operator("object.print3d_align_xy")
+
+        layout.label(text="Build Volume")
+        row = layout.row(align=True)
+        row.prop(props, "bed_profile", text="")
+
+        if props.bed_profile == "CUSTOM":
+            col = layout.column(align=True)
+            col.enabled = is_mesh
+            col.prop(props, "bed_size_x")
+            col.prop(props, "bed_size_y")
+            col.prop(props, "bed_size_z")
+        else:
+            dims = bed_profile_dimensions(props)
+            layout.label(text=tip_("Preset: {} x {} x {} mm").format(*[round(v, 2) for v in dims]))
+
+        row = layout.row(align=True)
+        row.enabled = is_mesh
+        row.operator("object.print3d_check_bed_fit", text="Check Fit")
+        op = row.operator("object.print3d_check_bed_fit", text="Auto Scale to Fit")
+        op.auto_scale = True
+
+        if props.bed_report:
+            box = layout.box()
+            box.label(text="Build Volume Report")
+            for line in props.bed_report.splitlines():
+                row = box.row()
+                if line.startswith("X:"):
+                    row.alert = props.bed_axis_overflow[0]
+                elif line.startswith("Y:"):
+                    row.alert = props.bed_axis_overflow[1]
+                elif line.startswith("Z:"):
+                    row.alert = props.bed_axis_overflow[2]
+                row.label(text=line)
 
         layout.label(text="Scale To")
         row = layout.row(align=True)

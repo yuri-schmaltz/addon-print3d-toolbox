@@ -226,6 +226,103 @@ class OBJECT_OT_align_xy(Operator):
         return self.execute(context)
 
 
+def _bounds_lengths(obj, depsgraph):
+    from mathutils import Vector
+
+    obj_eval = obj.evaluated_get(depsgraph)
+    coords = [Vector(v) @ obj_eval.matrix_world for v in obj_eval.bound_box]
+    return tuple(max(c[i] for c in coords) - min(c[i] for c in coords) for i in range(3))
+
+
+class OBJECT_OT_check_bed_fit(Operator):
+    bl_idname = "object.print3d_check_bed_fit"
+    bl_label = "Check Bed Fit"
+    bl_description = "Compare the active object's bounds against the selected build volume"
+    bl_options = {"REGISTER", "UNDO"}
+
+    auto_scale: BoolProperty(
+        name="Auto Scale",
+        description="Scale the selection uniformly to fit the selected build volume",
+        default=False,
+    )
+    highlight_axes: BoolProperty(
+        name="Highlight Overflow Axes",
+        description="Flag axes that exceed the build volume in the panel output",
+        default=True,
+    )
+
+    def _update_report(self, props, lines: list[str], flags: tuple[bool, bool, bool]):
+        props.bed_report = "\n".join(lines)
+        props.bed_axis_overflow = flags
+
+    def execute(self, context):
+        from .. import lib
+        from ..preferences import bed_profile_dimensions
+
+        obj = context.active_object
+        if obj is None or obj.type != "MESH":
+            self.report({"ERROR"}, "Active object must be a mesh")
+            return {"CANCELLED"}
+
+        props = context.scene.print3d_toolbox
+        bed_dims = bed_profile_dimensions(props)
+
+        if any(dim <= 0.0 for dim in bed_dims):
+            self.report({"ERROR"}, "Build volume dimensions must be greater than zero")
+            return {"CANCELLED"}
+
+        depsgraph = context.evaluated_depsgraph_get()
+        lengths = _bounds_lengths(obj, depsgraph)
+
+        overflows = []
+        for i, axis in enumerate("XYZ"):
+            if lengths[i] > bed_dims[i]:
+                overflows.append((i, axis))
+
+        lines = [tip_("Build volume"), tip_("X/Y/Z: {} / {} / {}").format(*[lib.clean_float(v, 4) for v in bed_dims])]
+        flags = [False, False, False]
+
+        if overflows and self.auto_scale:
+            valid_lengths = [bed_dims[i] / lengths[i] for i in range(3) if lengths[i] > 0]
+            if not valid_lengths:
+                self.report({"WARNING"}, "Object has zero bounds")
+                return {"CANCELLED"}
+
+            scale = min(valid_lengths)
+            _scale(scale, report=self.report, report_suffix=tip_(", Fit to build volume"))
+
+            lengths = _bounds_lengths(obj, depsgraph)
+            overflows.clear()
+            for i, axis in enumerate("XYZ"):
+                if lengths[i] > bed_dims[i]:
+                    overflows.append((i, axis))
+
+            lines.append(tip_("Auto scale applied: {}x").format(lib.clean_float(scale, 4)))
+
+        if not overflows:
+            lines.append(tip_("Fits within build volume"))
+        else:
+            lines.append(tip_("Does not fit: exceeds {} axis").format(", ".join(axis for _, axis in overflows)))
+
+        for i, axis in enumerate("XYZ"):
+            limit = bed_dims[i]
+            length = lengths[i]
+            overflow = max(length - limit, 0.0)
+            label = tip_("{0}: {1} / {2}").format(axis, lib.clean_float(length, 4), lib.clean_float(limit, 4))
+            if overflow > 0.0:
+                label += tip_(" (+{})").format(lib.clean_float(overflow, 4))
+                flags[i] = True
+            lines.append(label)
+
+        if not self.highlight_axes:
+            flags = (False, False, False)
+        else:
+            flags = tuple(flags)
+
+        self._update_report(props, lines, flags)
+        return {"FINISHED"}
+
+
 def _scale(scale: float, report=None, report_suffix="") -> None:
     from .. import lib
 

@@ -10,6 +10,7 @@ from bmesh.types import BMEdge, BMFace, BMVert
 from bpy.app.translations import pgettext_tip as tip_
 from bpy.props import IntProperty
 from bpy.types import Object, Operator
+from mathutils import Euler, Matrix, Vector
 
 from .. import report
 
@@ -294,6 +295,100 @@ class MESH_OT_check_overhang(Operator):
 
     def execute(self, context):
         return execute_check(self, context)
+
+
+class OBJECT_OT_optimize_overhang(Operator):
+    bl_idname = "object.print3d_optimize_overhang"
+    bl_label = "Optimize Overhang Orientation"
+    bl_description = "Sample orientations and rotate the active object to reduce overhangs"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @staticmethod
+    def _iter_rotations(iterations: int):
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+
+        for i in range(iterations):
+            yaw = (i * golden_angle) % (math.tau)
+            pitch = math.acos(1.0 - 2.0 * ((i + 0.5) / iterations)) - (math.pi / 2.0)
+            yield Euler((pitch, 0.0, yaw)).to_quaternion()
+
+    @staticmethod
+    def _overhang_score(obj: Object, matrix_world: Matrix, limit_angle: float) -> tuple[int, float]:
+        from .. import lib
+
+        bm = lib.bmesh_copy_from_object(obj, transform=False, triangulate=False)
+
+        mat = matrix_world.copy()
+        mat.translation.zero()
+        if not mat.is_identity:
+            bm.transform(mat)
+            bm.normal_update()
+
+        z_down = Vector((0.0, 0.0, -1.0))
+        z_down_angle = z_down.angle
+        angle_overhang = (math.pi / 2.0) - limit_angle
+
+        overhang_count = 0
+        min_angle = math.pi
+
+        for face in bm.faces:
+            angle = z_down_angle(face.normal, 4.0)
+            min_angle = min(min_angle, angle)
+            if angle < angle_overhang:
+                overhang_count += 1
+
+        bm.free()
+
+        return overhang_count, min_angle
+
+    @staticmethod
+    def _is_better(score: tuple[int, float], current: tuple[int, float]) -> bool:
+        count, angle = score
+        best_count, best_angle = current
+        return count < best_count or (count == best_count and angle > best_angle)
+
+    def execute(self, context):
+        if context.mode not in {"OBJECT", "EDIT_MESH"}:
+            return {"CANCELLED"}
+
+        obj = context.active_object
+
+        if obj is None or obj.type != "MESH":
+            self.report({"ERROR"}, "Active object is not a mesh")
+            return {"CANCELLED"}
+
+        props = context.scene.print3d_toolbox
+        iterations = max(1, props.overhang_optimize_iterations)
+        limit_angle = props.overhang_optimize_angle
+
+        loc, rot, scale = obj.matrix_world.decompose()
+        base_matrix = Matrix.LocRotScale(loc, rot, scale)
+        best_matrix = base_matrix
+        best_score = self._overhang_score(obj, base_matrix, limit_angle)
+
+        for quat in self._iter_rotations(iterations):
+            candidate_rot = quat @ rot
+            candidate_matrix = Matrix.LocRotScale(loc, candidate_rot, scale)
+            score = self._overhang_score(obj, candidate_matrix, limit_angle)
+
+            if self._is_better(score, best_score):
+                best_score = score
+                best_matrix = candidate_matrix
+
+        obj.matrix_world = best_matrix
+
+        overhang_faces, min_angle = best_score
+        angle_deg = math.degrees(min_angle)
+        self.report(
+            {"INFO"},
+            tip_("Overhang optimized: {} overhang faces, smallest angle {:.1f}°").format(
+                overhang_faces, angle_deg
+            ),
+        )
+
+        multiple_obj_warning(self, context)
+
+        return {"FINISHED"}
 
 
 class MESH_OT_check_all(Operator):

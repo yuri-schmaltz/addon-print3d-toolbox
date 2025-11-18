@@ -71,6 +71,15 @@ class EXPORT_SCENE_OT_export(Operator):
                 apply_modifiers=True,
                 export_selected_objects=True,
             )
+        elif props.export_format == "3MF":
+            ret = bpy.ops.export_scene.threemf(
+                filepath=filepath,
+                global_scale=global_scale,
+                use_scene_unit=props.use_3mf_units,
+                export_materials=props.use_3mf_materials,
+                apply_modifiers=True,
+                export_selected_objects=True,
+            )
         else:
             assert 0
 
